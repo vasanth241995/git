@@ -1,0 +1,170 @@
+---
+- name: Upgrade Apache HTTP Server
+  hosts: server
+  become_user: "{{su_user}}"
+
+  tasks:
+
+########################### Pre-Install #########################################  
+
+    - name: Create Backup/Release directories
+      file: path="{{item}}/{{change_no}}/{{bld_no}}" state=directory mode=0755
+      with_items:
+        - "{{release_path}}"
+        - "{{backup_path}}"
+      tags: Pre_Install
+
+    - name: Take the backup
+      shell: cd {{home_path}} ; tar --exclude="*log*" -czvf {{backup_path}}/{{change_no}}/{{bld_no}}/Apache.tgz {{old_apache_path}}
+      tags: Pre_Install
+
+    - name: Download the Apache release from Artifactory
+      get_url:
+        url: "{{apache_url}}"
+        dest: "{{release_path}}/{{change_no}}/{{bld_no}}/{{new_apache_ver}}.tar.gz"
+        url_username: "{{repouser}}"
+        url_password: "{{repopwd}}"
+        use_proxy: yes
+        timeout: 60
+        mode: 0755
+        validate_certs: false
+      environment:
+        http_proxy: http://{{proxy_url}}
+        https_proxy: https://{{proxy_url}}
+      tags: Pre_Install
+
+    # - name: Download APR release 
+    #   get_url:
+    #     url: "{{ apr_url }}"
+    #     dest: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/{{ apr_ver }}.tar.gz"
+    #     url_username: "{{ repouser }}"
+    #     url_password: "{{ repopwd }}"
+    #     use_proxy: yes
+    #     timeout: 60
+    #     mode: 0755
+    #     validate_certs: false
+    #   environment:
+    #     http_proxy: http://{{proxy_url}}
+    #     https_proxy: https://{{proxy_url}}
+    #   tags: Pre_Install
+
+    # - name: Download APR-Util Release
+    #   get_url:
+    #     url: "{{ apr_util_url }}"
+    #     dest: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/{{ apr_util_ver }}.tar.gz"
+    #     url_username: "{{ repouser }}"
+    #     url_password: "{{ repopwd }}"
+    #     use_proxy: yes
+    #     timeout: 60
+    #     mode: 0755
+    #     validate_certs: false
+    #   environment:
+    #     http_proxy: http://{{proxy_url}}
+    #     https_proxy: https://{{proxy_url}}
+    #   tags: Pre_Install
+    
+###################################### Upgrade Apache #####################################
+
+    - name: Create Directory for new Apache verion
+      file: path="{{ new_apache_path }}" state=directory mode=0755
+      tags: Upgrade
+
+    - name: Unzip release artifact in release folder
+      unarchive:
+        src: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/{{ new_apache_ver }}.tar.gz"
+        dest: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/"
+      tags: Upgrade
+
+    # - name: Unzip APR release
+    #   unarchive:
+    #     src: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/{{ apr_ver }}.tar.gz"
+    #     dest: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/"
+    #   tags: Upgrade
+
+    # - name: Unzip APR-Util
+    #   unarchive:
+    #     src: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/{{ apr_util_ver }}.tar.gz"
+    #     dest: "{{ release_path }}/{{ change_no }}/{{ bld_no }}/"
+    #   tags: Upgrade
+
+    # - name: Configure APR
+    #   command: ./configure --prefix=/usr/local/apr
+    #   args:
+    #     chdir: "{{ release_path }}/apr"
+    #   tags: Upgrade
+
+    # - name: Make APR
+    #   command: make
+    #   args:
+    #     chdir: "{{ release_path }}/apr"
+    #   tags: Upgrade
+
+    # - name: Make Install APR
+    #   command: make install
+    #   args:
+    #     chdir: "{{ release_path }}/apr"
+    #   tags: Upgrade
+
+    # - name: Configure APR Util
+    #   command: ./configure --prefix=/usr/local/apr-util --with-apr=/usr/local/apr
+    #   args:
+    #     chdir: "{{ release_path }}/apr-util"
+    #   tags: Upgrade
+
+    # - name: Make Install APR Util
+    #   command: make install
+    #   args:
+    #     chdir: "{{ release_path }}/apr-util"
+    #   tags: Upgrade
+
+    - name: Configure Apache
+      command: ./configure --prefix={{ new_apache_path }} --with-apr=/usr/local/apr --with-apr-util=/usr/local/apr-util --enable-ssl --enable-so
+      args:
+        chdir: "{{ release_path }}/{{ change_no }}/{{ bld_no }}//{{ new_apache_ver }}"
+      tags: Upgrade
+
+    - name: Make Apache
+      command: make
+      args:
+        chdir: "{{ release_path }}/{{ change_no }}/{{ bld_no }}//apache-http-server"
+      tags: Upgrade
+
+    - name: Make Install Apache
+      command: make install
+      args:
+        chdir: "{{ release_path }}/{{ change_no }}/{{ bld_no }}//apache-http-server"
+      tags: Upgrade
+
+
+################################ Restart Apache ###############################################
+
+    - name: Stop the Applications
+      shell: "cd {{ item.path }} && sh {{ item.path }}/{{ stopScript }}"
+      with_items: "{{ app_det }}"
+      tags: Restart
+      ignore_errors: true
+      when: app_det is defined
+
+    - name: Copy folders from Old Apache to New Apache 
+      copy: scr = "{{ old_apache_path }}/{{ item }}" dest = "{{ new_apache_path }}/{{ app_recover }}" mode=0755 remote_src=yes
+      with_items: 
+        - "{{ dir_recover }}"
+      tags: Upgrade      
+
+    - name: Update Symbolic link for Apache
+      file: src={{new_apache_path}} dest="{{home_path}}/{{sym8_link}}" state=link
+      tags: Upgrade
+      
+    - name: Start the Applications
+      shell: "cd {{ item.path }} && sh {{ item.path }}/{{ startScript }}"
+      with_items: "{{ app_det }}"
+      delay: 5
+      retries: 4
+      tags: Restart
+      ignore_errors: true
+      when: app_det is defined      
+
+    - name: Remove old Apache folder
+      shell: " rm -rf {{ old_apache_path }}"
+      ignore_errors: true
+      tags: Upgrade
