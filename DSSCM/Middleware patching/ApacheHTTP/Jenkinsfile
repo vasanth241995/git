@@ -1,0 +1,136 @@
+pipeline {
+  agent { node { label "ansible" } } //## Scrum region
+  //agent { node { label "py27-ansible2-9-ora12c" } } // ## For HigherRegions test
+  stages {
+
+  stage ('Parameters') {
+      steps {
+        script {
+          properties([
+            parameters([
+                [$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the Environment',
+                  name: 'Region',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['DEV', 'QA', 'UAT', 'PROD', 'DR']
+                                  '''
+                              ]
+                      ]
+              ],
+      string(defaultValue: 'Apache_2.4.57', description: 'Enter the deploying ApacheHTTP version', name: 'new_ApacheHTTP_vrsn', trim: true),
+      string(defaultValue: 'Apache_2.4.41', description: 'Enter the deploying ApacheHTTP version', name: 'old_ApacheHTTP_vrsn', trim: true),
+      string(defaultValue: '', description: 'Enter the deploying APR version', name: 'new_APR_vrsn', trim: true),
+      string(defaultValue: '', description: 'Enter the deploying APR-Util version', name: 'new_APR_Util_vrsn', trim: true),
+      string(defaultValue: 'https://dlcdn.apache.org/httpd/httpd-2.4.57.tar.gz', description: 'Enter the HTTP URL for ApacheHTTP server', name: 'apacheHTTP_URL', trim: true),
+      string(defaultValue: '', description: 'Enter the HTTP URL for APR ', name: 'apr_URL', trim: true),
+      string(defaultValue: '', description: 'Enter the HTTP URL for APR-Util', name: 'apr_Util_URL', trim: true),
+      string(defaultValue: '', description: 'Enter the Change Number', name: 'ChangeNumber', trim: true),
+      string(defaultValue: '', description: 'For Rollback: please provide the BUILD NUMBER from which backup was taken, else ignore.', name: 'BuildNumber', trim: true),
+      string(defaultValue: '', description: 'Enter if pre_install is done already, else ignore.', name: 'BuildNumber', trim: true),
+      [$class: 'ChoiceParameter',
+                  choiceType: 'PT_CHECKBOX',
+                  description: 'Choose what need to perform!',
+                  name: 'Steps',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['Pre_Install', 'Upgrade', 'Restart']
+                                  '''
+                              ]
+                      ]
+              ]
+            ])
+          ])
+        }
+      }
+    }
+
+
+    stage("Ansible") {
+    //agent { node { label "py27-ansible2-9-ora12c" } } // ## For HigherRegions
+      agent { node { label "ansible" } }  //## Scrum region
+      steps {
+        script {
+          if( "${ChangeNumber}" == "" ) {
+              echo "Change number is empty. Exiting!!"
+              //break
+              exit 1
+          }
+           if ("${BuildNumber}" == "") {
+             echo "${BuildNumber}"
+             BuildNumber = "${BUILD_NUMBER}"
+             }
+            echo "${BuildNumber}"
+          //Servers = params.Servers.trim()
+          if ( Region.equals("DEV")) {
+            ServerGroup = ['']
+          } else if ( Region.equals("QA")) {
+            ServerGroup = [ 'vlltcdesoqcap03' ]
+            } else if ( Region.equals("UAT")) {
+            ServerGroup = [ '' ]
+          } else if ( Region.equals("PROD")) {
+            ServerGroup = [ '' ]
+          } else if ( Region.equals("DR")) {
+            ServerGroup = [ '' ]
+          }
+          println "=======>> INFO:: Change Number - ${ChangeNumber}"
+          println "=======>> INFO:: Environment - ${Region}"
+          //println "INFO:: Server name - ${Servers}"
+          withCredentials([
+            usernamePassword(credentialsId: 'dsartifactory_id', passwordVariable: 'repopwd', usernameVariable: 'repouser') ]) {
+              for ( servers in ServerGroup ) {
+                if ( "${servers}" == "vlltcdesoqcap03" || "${servers}" == "" ) {
+                  creds_id="jenkins_dsappadm"
+                } else if ( "${servers}" ==  "" ) {
+                  creds_id="jenkins_dsbatch_ops"
+                } else if ( "${servers}" ==  "" ) {
+                  creds_id="jenkins_tomcat"
+                } else if ( "${servers}" ==  "" ) {
+                  creds_id="jenkins_dswebadmin"
+                }
+
+                echo "<<<<<<<<<<====================================================================>>>>>>>>>>"
+                echo "INFO: Running on ${servers}"
+                ansiblePlaybook (
+                  playbook: "ApacheHTTP/playbook.yml",
+                  inventory: "ApacheHTTP/${Region}/${servers}",
+                  disableHostKeyChecking: true,
+                  credentialsId: "${creds_id}",
+                  tags: "${Steps}",
+                  extraVars: [
+                    repouser: "${repouser}",
+                    repopwd: "${repopwd}",
+                    bld_no: "${BuildNumber}",
+                    new_apache_ver: "${new_ApacheHTTP_vrsn}",
+                    old_apache_ver: "${new_ApacheHTTP_vrsn}",
+                    change_no: "${ChangeNumber}",
+                    apache_url: "${apacheHTTP_url}",
+                    apr_URL: "${apr_url}",
+                    apr_Util_URL: "${apr_util_url}",
+                  ]
+                )
+                echo "=======>> INFO: Completed on ${servers}"
+              }
+           }
+        }
+      }
+    }
+  }
+}
