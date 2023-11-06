@@ -1,0 +1,179 @@
+def release_path
+def backup_path
+String[] ServerGroup;
+def SIT_SERVERS
+def UAT_SERVERS
+def PROD_SERVERS
+def DR_SERVERS
+def slct_inv
+def superuser
+String[] limit
+
+pipeline {
+  agent {
+    node {
+      label "py27-ansible2-9-ora12c"
+    }
+  } // ## For HigherRegions
+  //agent { node { label "ansible" } } // ## For SCRUM
+
+  parameters {
+    choice choices: ['SELECT', 'SIT', 'UAT', 'PHOENIX', 'BDOC'], description: 'Choose the environment', name: 'Environment'
+    choice choices: ['SELECT', 'YES', 'NO'], description: 'Java 8 needs an upgrade ?', name: 'optJDK8'
+    choice choices: ['SELECT', 'YES', 'NO'], description: 'Does Java 11 need an upgrade ?', name: 'optJDK11'
+    string defaultValue: 'Enter the OLD JDK version as jdk1.8.0_321', description: 'Enter the OLD JDK version as jdk1.8.0_321; Please fill if java 8 is getting upgraded', name: 'old_jdk8_version', trim: true
+    string defaultValue: 'Enter the NEW JDK version as jdk1.8.0_351', description: 'Enter the NEW JDK version as jdk1.8.0_351; Please fill if java 8 is getting upgraded', name: 'new_jdk8_version', trim: true
+    string defaultValue: 'Enter the OLD JDK version as jdk-11.0.14', description: 'Enter the OLD JDK version as jdk-11.0.14; Please fill if java 11 is getting upgraded', name: 'old_jdk11_version', trim: true
+    string defaultValue: 'Enter the NEW JDK version as jdk-11.0.17', description: 'Enter the NEW JDK version as jdk-11.0.17', name: 'new_jdk11_version', trim: true
+    string defaultValue: 'https://artifactory.fis.dev/artifactory/ds-maven-release-local/utilities/jdk-8u351-linux-x64.tar.gz', description: 'Enter the JDK-8 artifactory URL, if applicable', name: 'art8_url', trim: true
+    string defaultValue: 'https://artifactory.fis.dev/artifactory/ds-maven-release-local/utilities/jdk-11.0.17_linux-x64_bin.tar.gz', description: 'Enter the JDK-11 artifactory URL, if applicable', name: 'art11_url', trim: true
+    string defaultValue: 'https://artifactory.fis.dev/artifactory/ds-maven-release-local/utilities/new_san_root.cer', description: 'Root cert URL', name: 'root_url', trim: true
+    string defaultValue: 'https://artifactory.fis.dev/artifactory/ds-maven-release-local/utilities/new_san_inter.cer', description: 'Inter cert URL', name: 'inter_url', trim: true
+    string defaultValue: '', description: 'Enter the Change Number', name: 'ChangeNumber', trim: true
+    string defaultValue: '', description: 'Enter if pre_install is done already, else ignore.', name: 'BuildNumber', trim: true
+  }
+
+  environment {
+    sit_servers = 'PDC8RNARDISAP03.prod.local,PDC8RNARDISAP04.prod.local,PDC8RNARDISAP05.prod.local,PDC8RNARDISAP06.prod.local'
+
+    uat_servers = 'PDC8RNARDISAP01.prod.local,PDC8RNARDISAP02.prod.local'
+
+    prod_servers = 'PDC1RNARDISAP01.prod.local,PDC1RNARDISAP02.prod.local,PDC1RNARDISAP03.prod.local,PDC1RNARDISAP04.prod.local,PDC1RNARDISAP05.prod.local,PDC1RNARDISAP06.prod.local,PDC1RNARDISAP07.prod.local,PDC1RNARDISAP08.prod.local'
+
+    dr_servers = 'BDC1RNARDISAP01.prod.local,BDC1RNARDISAP02.prod.local,BDC1RNARDISAP03.prod.local,BDC1RNARDISAP04.prod.local,BDC1RNARDISAP05.prod.local,BDC1RNARDISAP06.prod.local,BDC1RNARDISAP07.prod.local,BDC1RNARDISAP08.prod.local'
+
+  }
+
+  stages {
+
+    stage("Definition") {
+      steps {
+        script {
+          //input ( message : "Batch processes stopped ??", ok : 'Yes, Proceed' )
+          release_path = "/appl/SCMSupport/Releases"
+          backup_path = "/appl/SCMSupport/Backups"
+
+          if (env.Environment == "SIT") {
+            SIT_SERVERS = sit_servers.tokenize(',')
+            ServerGroup = SIT_SERVERS
+            slct_inv = "sit.ini"
+            superuser = "appadm"
+            zone = "sit"
+            creds_id1 = "jenkins_appadm"
+            proxy_url = "proxy.prod.local:8080"
+          } else if (env.Environment == "UAT") {
+            UAT_SERVERS = uat_servers.tokenize(',')
+            ServerGroup = UAT_SERVERS
+            slct_inv = "uat.ini"
+            superuser = "appadm"
+            zone = "uat"
+            creds_id1 = "jenkins_appadm"
+            proxy_url = "proxy.prod.local:8080"
+          } else if (env.Environment == "PHOENIX") {
+            PROD_SERVERS = prod_servers.tokenize(',')
+            ServerGroup = PROD_SERVERS
+            slct_inv = "prod.ini"
+            superuser = "appadm"
+            zone = "prod"
+            creds_id1 = "jenkins_appadm"
+            proxy_url = "proxy.prod.local:8080"
+          } else if (env.Environment == "BDOC") {
+            DR_SERVERS = dr_servers.tokenize(',')
+            ServerGroup = DR_SERVERS
+            slct_inv = "dr.ini"
+            superuser = "appadm"
+            zone = "dr"
+            creds_id1 = "jenkins_appadm"
+            proxy_url = "proxy.prod.local:8080"
+          }
+        }
+      }
+
+    }
+
+    stage("Pre-Install") {
+      steps {
+        script {
+          withCredentials([
+            sshUserPrivateKey(credentialsId: "${creds_id1}", keyFileVariable: 'ssh_key'),
+            usernamePassword(credentialsId: 'dsartifactory_id', passwordVariable: 'repopwd', usernameVariable: 'repouser')
+          ]) {
+            if ("${ChangeNumber}" == "") {
+              error("Change number is empty. Exiting")
+            }
+            if (Steps.equals('Restart')) {
+              echo "INFO: Proceeding with restart"
+            } else if (Steps.contains('Pre_Install')) {
+              echo "INFO: Downloading JDK and certs from Artifactory"
+              if (env.optJDK8 == "YES") {
+                sh "export http_proxy=$proxy_url && export https_proxy=$proxy_url && wget --auth-no-challenge --user=${repouser} --password=${repopwd} ${art8_url} -O ${new_jdk8_version}.tgz --no-check-certificate"
+              }
+              if (env.optJDK11 == "YES") {
+                sh "export http_proxy=$proxy_url && export https_proxy=$proxy_url && wget --auth-no-challenge --user=${repouser} --password=${repopwd} ${art11_url} -O ${new_jdk11_version}.tgz --no-check-certificate"
+              }
+              sh "export http_proxy=$proxy_url && export https_proxy=$proxy_url && wget --auth-no-challenge --user=${repouser} --password=${repopwd} ${root_url} -O root.cer --no-check-certificate"
+              sh "export http_proxy=$proxy_url && export https_proxy=$proxy_url && wget --auth-no-challenge --user=${repouser} --password=${repopwd} ${inter_url} -O inter.cer --no-check-certificate"
+              for (server in ServerGroup) {
+                echo "INFO: Transferring Artifacts"
+                sh "ssh -i ${ssh_key} -q -o StrictHostKeyChecking=no ${superuser}@${server} mkdir -p ${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+                sh "scp -i ${ssh_key} -q root.cer inter.cer ${superuser}@${server}:${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+                if (env.optJDK8 == "YES") {
+                  sh "scp -i ${ssh_key} -q ${new_jdk8_version}.tgz ${superuser}@${server}:${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+                }
+                if (env.optJDK11 == "YES") {
+                  if (server == "PDC8RNARDISAP02.prod.local" || server == "PDC1RNARDISAP07.prod.local" || server == "PDC1RNARDISAP08.prod.local" || server == "BDC1RNARDISAP07.prod.local" || server == "BDC1RNARDISAP08.prod.local") {
+                    sh "scp -i ${ssh_key} -q ${new_jdk11_version}.tgz ${superuser}@${server}:${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+                  }
+                }
+                sh "ssh -i ${ssh_key} -q -o StrictHostKeyChecking=no ${superuser}@${server} ls ${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+                echo "INFO: Artifacts transferred in ${server}"
+              }
+            }
+          }
+        }
+      }
+    }
+
+    stage("Upgrade") {
+      steps {
+        script {
+          echo "INFO: Executing playbook."
+          serial_no = "8"
+          if ("${RestartOption}" == "OneAtTime") {
+            serial_no = "1"
+          } else if ("${RestartOption}" == "AllAtOnce") {
+            serial_no = "8"
+          }
+          echo "${BuildNumber}"
+          if ("${BuildNumber}" == "") {
+            echo "${BuildNumber}"
+            BuildNumber = "${BUILD_NUMBER}"
+          }
+          echo "${BuildNumber}"
+          ansiColor('xterm') {
+            ansiblePlaybook(
+              playbook: "DiscoveryJDK/playbook.yml",
+              inventory: "DiscoveryJDK/higher/$slct_inv",
+              credentialsId: "${creds_id1}",
+              tags: "${Steps}",
+              colorized: true,
+              // extras: "-vvv",
+              extraVars: [
+                zone: "${zone}",
+                old_8vrsn: "${old_jdk8_version}",
+                new_8vrsn: "${new_jdk8_version}",
+                old_11vrsn: "${old_jdk11_version}",
+                new_11vrsn: "${new_jdk11_version}",
+                isJava8: "${env.optJDK8}",
+                isJava11: "${env.optJDK11}",
+                bld_no: "${BuildNumber}",
+                change_no: "${ChangeNumber}",
+                serial_no: "${serial_no}"
+              ]
+            )
+          }
+        }
+      }
+    }
+  }
+}
