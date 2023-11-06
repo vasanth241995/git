@@ -1,0 +1,166 @@
+- name: Java 8 upgrade
+  hosts: "{{zone}}"
+  become_user: "{{su_user}}"
+  gather_facts: yes
+
+  tasks:
+
+    - name: Create directories
+      file: path="{{item}}/{{change_no}}/{{bld_no}}" state=directory mode=0755
+      with_items:
+        - "{{release_path}}"
+        - "{{backup_path}}"
+      tags: Pre_Install
+
+    - name: Backup JDK8 with build number
+      archive: path="{{old8_java_home}}" dest="{{backup_path}}/{{change_no}}/{{bld_no}}/{{old_8vrsn}}.tgz"
+      tags: Pre_Install
+      when: isJava8 == "YES"
+
+    - name: Unzip the downloaded JDK8
+      unarchive: src="{{release_path}}/{{change_no}}/{{bld_no}}/{{new_8vrsn}}.tgz"  dest="{{app_loc}}" mode=0755 remote_src=yes
+      tags: Deploy
+      when: isJava8 == "YES"
+
+    - name: Take backup of cacerts.
+      copy: src="{{ new8_java_home }}/jre/lib/security/cacerts" dest="{{backup_path}}/{{change_no}}/{{bld_no}}/cacerts8_{{ lookup('env','BUILD_NUMBER') }}" remote_src=yes
+      tags: Deploy
+      when: isJava8 == "YES"
+
+    - name: Import certs in to cacerts.
+      java_cert:
+        cert_path: "{{release_path}}/{{change_no}}/{{bld_no}}/{{item.path}}"
+        keystore_path: "{{ new8_java_home }}/jre/lib/security/cacerts"
+        keystore_pass: changeit
+        cert_alias: "{{item.alias}}"
+        executable: "{{ new8_java_home }}/bin/keytool"
+      with_items:
+        - { path: "root.cer", alias: fnfis_root }
+        - { path: "inter.cer", alias: fnfis_inter }
+      tags: Deploy
+      when: isJava8 == "YES"
+
+    - name: Update the symbolic linkfor Java 8
+      file: src={{new8_java_home}} dest="{{app_loc}}/{{sym8_link}}" state=link
+      tags: Deploy
+      when: isJava8 == "YES"
+
+- name: Java 11 Upgrade
+  hosts: batch
+  become_user: appadm
+
+  tasks:
+
+    - name: Backup Java 11 with build number
+      archive: path="{{old11_java_home}}" dest="{{backup_path}}/{{change_no}}/{{bld_no}}/{{old_11vrsn}}.tgz"
+      tags: Pre_Install
+      when: isJava11 == "YES"
+
+    - name: Unzip the downloaded JDK11
+      unarchive: src="{{release_path}}/{{change_no}}/{{bld_no}}/{{new_11vrsn}}.tgz"  dest="{{app_loc}}" mode=0755 remote_src=yes
+      tags: Deploy
+      when: isJava11 == "YES"
+
+    - name: Take backup of cacerts.
+      copy: src="{{ new11_java_home }}/lib/security/cacerts" dest="{{backup_path}}/{{change_no}}/{{bld_no}}/cacerts11_{{ lookup('env','BUILD_NUMBER') }}" remote_src=yes
+      tags: Deploy
+      when: isJava11 == "YES"
+
+    - name: Import certs in to cacerts.
+      java_cert:
+        cert_path: "{{release_path}}/{{change_no}}/{{bld_no}}/{{item.path}}"
+        keystore_path: "{{ new11_java_home }}/lib/security/cacerts"
+        keystore_pass: changeit
+        cert_alias: "{{item.alias}}"
+        executable: "{{ new11_java_home }}/bin/keytool"
+      with_items:
+        - { path: "root.cer", alias: fnfis_root }
+        - { path: "inter.cer", alias: fnfis_inter }
+      tags: Deploy
+      when: isJava11 == "YES"
+
+    - name: Update the symbolic link for Java 11
+      file: src={{new11_java_home}} dest="{{app_loc}}/{{sym11_link}}" state=link
+      tags: Deploy
+      when: isJava11 == "YES"
+
+    - name: Remove Java 11
+      shell: "rm -rf {{old11_java_home}}"
+      when: isJava11 == "YES"
+      tags: Restart
+
+- name: Restart nodes
+  hosts: "{{zone}}"
+  become_user: "{{su_user}}"
+  gather_facts: yes
+  serial: "{{ serial_no }}"
+
+  tasks:
+
+    - name: Stop servers
+      shell: "{{bin_path}}/stopjboss_auto.sh || echo 'Maybe already stopped' "
+      register: stp
+      tags: Restart
+      when: isJava8 == "YES"
+
+    - name: Show output
+      debug: msg="{{stp.stdout_lines}}"
+      tags: Restart
+      when: isJava8 == "YES"
+
+    - name: Start servers
+      shell: "{{bin_path}}/startjboss_auto.sh || echo 'Maybe already started' "
+      register: strt
+      tags: Restart
+      when: isJava8 == "YES"
+
+    - name: Check the log output
+      shell: "grep 'WFLYSRV0025: JBoss EAP' {{ s_log }} | grep -vi error"
+      register: grep_opt1
+      until: grep_opt1.stdout.find("started in") != -1
+      delay: 60
+      retries: 5
+      tags: Restart
+      ignore_errors: yes
+      when: isJava8 == "YES"
+
+    - name: Process is started
+      debug: msg="Jboss in {{ansible_host}} is started. Please verify"
+      when: grep_opt1.stdout.find('WFLYSRV0025') != -1 and isJava8 == "YES"
+      tags: Restart
+
+    - name: Process is not started
+      debug: msg="Jboss in {{ansible_host}} is NOT started. Please check logs."
+      when: not grep_opt1.stdout is search('WFLYSRV0025') and isJava8 == "YES"
+      tags: Restart
+
+    - name: Remove Java 8
+      shell: "rm -rf {{old8_java_home}}"
+      when: grep_opt1.stdout.find('WFLYSRV0025') != -1 and isJava8 == "YES"
+      tags: Restart
+
+    # - name: Stop batchprocessor
+    #   shell: /appl/standalone/batchprocessor/stop.sh
+    #   register: stopbatch
+    #   when: ansible_ssh_host == 'vlcapdscdevap1.fisdev.local' or ansible_ssh_host == 'vlcapdscqcz1ap3.fisdev.local' or ansible_ssh_host == 'vlcapdscqcz2ap3.fisdev.local' or ansible_ssh_host == 'PDC8RNARDISAP02.prod.local'
+    #   until: stopbatch.stdout.find('Stopped Successfully') != -1
+    #   delay: 5
+    #   retries: 10
+    #   args:
+    #     executable: /bin/bash
+    #   environment:
+    #     JAVA_HOME: /appl/Java
+    #   tags: Restart
+
+    # - name: Start batchprocessor
+    #   command: "nohup /appl/standalone/batchprocessor/run.sh &"
+    #   register: startbatch
+    #   when: ansible_ssh_host == 'vlcapdscdevap1.fisdev.local' or ansible_ssh_host == 'vlcapdscqcz1ap3.fisdev.local' or ansible_ssh_host == 'vlcapdscqcz2ap3.fisdev.local' or ansible_ssh_host == 'PDC8RNARDISAP02.prod.local'
+    #   until: startbatch.stdout.find('Batch Processor Started') != -1
+    #   delay: 5
+    #   retries: 10
+    #   args:
+    #     executable: /bin/bash
+    #   environment:
+    #     JAVA_HOME: /appl/Java
+    #   tags: Restart
