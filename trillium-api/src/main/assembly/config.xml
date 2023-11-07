@@ -1,0 +1,17 @@
+<assembly>
+	<id>config</id>
+	<formats>
+		<format>tar</format>
+	</formats>
+	<includeBaseDirectory>false</includeBaseDirectory>
+	<fileSets>
+		<fileSet>
+			<filtered>true</filtered>
+			<directory>config</directory>
+			<includes>
+				<include>*.properties</include>
+			</includes>
+			<outputDirectory>.</outputDirectory>
+		</fileSet>
+	</fileSets>
+</assembly> 
