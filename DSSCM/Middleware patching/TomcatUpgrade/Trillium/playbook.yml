@@ -1,0 +1,137 @@
+- name: Tomcat Upgrade
+  hosts: "{{zone}}"
+  become_user: "{{su_user}}"
+  gather_facts: yes
+
+  tasks:
+
+    - name: Create directories
+      file: path="{{item}}" state=directory mode=0755
+      with_items:
+        - "{{backup_path}}/{{change_no}}/{{bld_no}}"
+        - "{{backup_path}}/{{change_no}}/{{bld_no}}/to_copy"
+
+    - name: Shutdown Trillium Director
+      shell: "cd {{tomcat_base}}/apache-tomcat-{{old_vrsn}}/bin ; nohup {{tomcat_base}}/apache-tomcat-{{old_vrsn}}/bin/shutdown.sh"
+      register: stop_output
+      environment:
+        JAVA: "{{java}}"
+        JAVA_HOME: "{{java_home}}"
+      ignore_errors : yes
+      tags: restart
+
+    - name: Show Stop Output
+      debug: var=stop_output.stdout_lines
+      tags: restart
+
+    - name: Remove existing symbolic link
+      shell: "cd {{tomcat_base}} && rm -f {{symLink_name}}"
+
+    - name: Move files from conf folder to a temp location
+      shell: "cp {{tomcat_base}}/apache-tomcat-{{old_vrsn}}/conf/{{item}} {{backup_path}}/{{change_no}}/{{bld_no}}/to_copy/"
+      with_items:
+        - "{{files_from_conf}}"
+
+    - name: Move folders to temp location
+      shell: "mv {{tomcat_base}}/apache-tomcat-{{old_vrsn}}/{{item}} {{backup_path}}/{{change_no}}/{{bld_no}}/to_copy/"
+      with_items:
+        - "{{folders_to_copy}}"
+
+    - name: Install Tomcat
+      unarchive:
+        src: "{{release_path}}/{{change_no}}/{{bld_no}}/{{new_vrsn}}.tgz"
+        dest: "{{tomcat_base}}/"
+        remote_src: yes
+        mode: 0755
+
+    - name: Copy files from conf
+      shell: "cp {{backup_path}}/{{change_no}}/{{bld_no}}/to_copy/{{item}} {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/"
+      with_items:
+        - "{{files_from_conf}}"
+
+    - name: Remove webapps from new version
+      shell: "rm -rf {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/webapps"
+
+    ## EDIT server.xml completed.
+
+    - name: Remove all comments from server.xml
+      shell: sed -i 's/<!--/\x0<!--/g;s/-->/-->\x0/g' {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml
+      args:
+        executable: /bin/bash
+
+    - name: Pretty-print the server.xml
+      shell: grep -zv '^<!--' {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml | tr -d '\0' | grep -v "^\s*$" > {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/tmp_srvxml
+      args:
+        executable: /bin/bash
+
+    - name: Copy from temp to server.xml
+      shell: cp {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/tmp_srvxml {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml
+
+    - name: Edit server.xml - Change HTTP/1.1 port
+      xml:
+        path: "{{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml"
+        xpath: /Server/Service/Connector[@protocol="HTTP/1.1"]
+        attribute: port
+        value: "{{conn_port | string }}"
+
+    - name: Edit server.xml - Add org.apache.coyote.http11.Http11NioProtocol Connector
+      xml:
+        path: "{{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml"
+        xpath: /Server/Service
+        add_children:
+          - Connector
+
+    - name: Edit server.xml - Add http11.Http11NioProtocol Connector attributes
+      xml:
+        path: "{{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/server.xml"
+        xpath: /Server/Service/Connector[last()]
+        attribute: "{{item.name}}"
+        value: "{{item.value}}"
+        pretty_print: yes
+      with_items: "{{http_nio}}"
+
+    ## EDITING server.xml COMPLETED
+
+    - name: Move files from temp to the new tomcat location
+      shell: "mv {{backup_path}}/{{change_no}}/{{bld_no}}/to_copy/{{item}} {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/conf/"
+      with_items:
+        - "{{files_from_conf}}"
+
+    - name: Move folders from temp to the new tomcat location
+      shell: "mv {{backup_path}}/{{change_no}}/{{bld_no}}/to_copy/{{item}} {{tomcat_base}}/apache-tomcat-{{new_vrsn}}/"
+      with_items:
+        - "{{folders_to_copy}}"
+
+    - name: Remove temp, tmp from OLD Tomcat
+      shell: cd {{tomcat_base}}/apache-tomcat-{{old_vrsn}} ; rm -rf tmp temp
+
+    - name: Tar the OLD Tomcat
+      archive:
+        path: "{{tomcat_base}}/apache-tomcat-{{old_vrsn}}"
+        dest: "{{backup_path}}/{{change_no}}/{{bld_no}}/apache-tomcat-{{old_vrsn}}.zip"
+        format: zip
+      register: tar_result
+      no_log: True
+
+    - name: Remove the OLD Tomcat folder
+      shell: "rm -rf {{tomcat_base}}/apache-tomcat-{{old_vrsn}}"
+      when: tar_result is succeeded
+
+    - name: Create symbolic link
+      shell: "cd {{tomcat_base}} && ln -s apache-tomcat-{{new_vrsn}} {{symLink_name}}"
+
+    - name: Start Trillium Director
+      shell: "cd {{tomcat_base}}/{{symLink_name}}/bin ; nohup {{tomcat_base}}/{{symLink_name}}/bin/startup.sh &"
+      register: start_output
+      ignore_errors: yes
+      environment:
+        JAVA: "{{java}}"
+        JAVA_HOME: "{{java_home}}"
+      tags: restart
+
+    - name: Show Start Output
+      debug: var=start_output.stdout_lines
+      tags: restart
+
+    - name: MESSAGE
+      debug: msg="Upgrade Completed. Please check logs."
