@@ -1,0 +1,17 @@
+  - set_fact: my_int_var="{{ hostvars[item]['finaljava11'] }}"
+  - debug:
+      msg: "{{ my_int_var.msg }}"
+
+  - name: Store status in file
+    lineinfile:
+      path: Deployment_Status_Java11.txt
+      line: "{{ item }} Matched"
+      create: yes
+    when: new_java11_version == "{{ my_int_var.msg }}"
+
+  - name: Store status in file
+    lineinfile:
+      path: Deployment_Status_Java11.txt
+      line: "{{ item }} Failed"
+      create: yes
+    when: new_java11_version != "{{ my_int_var.msg }}"
