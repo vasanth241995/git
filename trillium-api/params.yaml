@@ -1,0 +1,29 @@
+stages:
+   checkout: true
+   build: true
+   blackduck: false
+   veracode: false
+   sonar: false
+   deploy_dev: true
+   deploy_qc: true
+   test: false
+vars:
+  deployment: 'snapshot'
+  mavenImg: 'ds-docker-dev.docker.fis.dev/maven:3.8.3-openjdk-17'
+  ArtifactoryURL: "https://artifactory.fis.dev/artifactory"
+  proxy_host: '10.7.199.135'
+  proxy_port: '8080'
+  emailid: 'sathyamala.nagarajan@fisglobal.com'
+blackduck:
+    url: 'https://fis.blackducksoftware.com'
+    project_name: 'Trillium-API_10000185'
+    project_version: '2023.Q4.v3'
+    credentials: 'black-duck-token'
+    detect_url: https://sig-repo.synopsys.com/artifactory/bds-integrations-release/com/synopsys/integration/synopsys-detect/7.0.0/synopsys-detect-7.0.0.jar
+veracode:
+   application_name: 'Identity Protection Service - Trigger Notifications'
+   sandbox_name: 'Trillium_API'
+   credentials: 'veracode-scan-upload-id'
+sonar:
+   credentials: 'SonarQube_Authtoken'
+   #placeholder
