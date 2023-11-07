@@ -1,0 +1,33 @@
+[node]
+
+server ansible_host=lrk4rsgdippap01.prod.local
+
+[all:vars]
+
+su_user=tomcat
+
+proxy_url=proxy.prod.local:8080
+
+release_path=/data/SCMSupport/Releases
+
+backup_path=/data/SCMSupport/Backup
+
+java8_home=/data/Java
+
+openjava17_home=/data/OpenJava17
+
+old_java8_home=/data/{{old_8vrsn}}
+
+new_java8_home=/data/{{new_8vrsn}}
+
+old_openjava17_home=/data/{{old_open17vrsn}}
+
+new_openjava17_home=/data/{{new_open17vrsn}}
+
+sym8_link=Java
+
+symopen17_link=OpenJava17
+
+app_loc=/data
+
+#app_det not required for Casevue Server
