@@ -1,0 +1,49 @@
+---
+
+- hosts: DEV,QC
+  gather_facts: no
+  remote_user: dsappadm
+
+  tasks:  
+    - set_fact: artifactory_url=https://artifactory.fis.dev/artifactory/ds-maven-release-local
+      when: deployment == "release"
+    
+    - set_fact: artifactory_url=https://artifactory.fis.dev/artifactory/ds-maven-snapshot-local
+      when: deployment == "snapshot"
+        
+    - name: Download latest artifact
+      maven_artifact:
+        group_id: com.fisglobal.trillium
+        artifact_id: trillium-api
+        repository_url: "{{ artifactory_url }}"
+        username: ds-cicd-svc
+        password: "{{ artifactory_password }}"
+        dest: /appl/trilapi
+      vars:
+        artifactory_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          37353563316635613765376232313837356231323563353736343834613633653238363334356439
+          3436396232643032306566323266333966373161363038320a646134353734616232346238616366
+          62333138333433646535656330656161616137393463316132373366656331633965363731373765
+          6433623030363938380a363834343731353338633635616434333235356430353866323266643036
+          6161
+      environment:
+        https_proxy: http://10.7.199.135:8080
+
+    - name: Wait until artifact has downloaded
+      wait_for:
+        path: /appl/trilapi/trillium-api-latest.jar
+        
+    - name: Stop Trillium Api
+      shell: /appl/trilapi/stop_trillium.sh
+      
+    - name: Remove old artifact
+      file:
+        path: /appl/trilapi/trillium-api-1.0.0-SNAPSHOT.jar
+        state: absent
+        
+    - name: Rename artifact
+      shell: mv /appl/trilapi/trillium-api-latest.jar /appl/trilapi/trillium-api-1.0.0-SNAPSHOT.jar
+      
+    - name: Start Trillium Api
+      shell: cd /appl/trilapi && ./start_trillium.sh
