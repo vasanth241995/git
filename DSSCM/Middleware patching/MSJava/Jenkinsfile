@@ -1,0 +1,243 @@
+pipeline {
+  //agent { node { label "ansible" } } //## Scrum region
+  agent { node { label "py27-ansible2-9-ora12c" } } // ## For HigherRegions
+  stages {
+
+  stage ('Parameters') {
+      steps {
+        script {
+          properties([
+            parameters([
+                [$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the Environment',
+                  name: 'Region',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['Select','QA', 'UAT', 'PROD', 'DR']
+                                  '''
+                              ]
+                      ]
+              ],
+              [$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the Server set to Deploy',
+                  name: 'Serverset',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['Select','Set1', 'Set2', 'Specific_Server']
+                                  '''
+                              ]
+                      ]
+              ],
+      string(defaultValue: '', description: 'Enter the Servers only if Specific_Server option selected, Otherwise not required', name: 'Specific_Server_list', trim: true),
+      choice (choices: ['SELECT', 'YES','NO'], description: 'Java 8 needs an upgrade ?', name: 'optJDK8'),
+      choice (choices: ['SELECT', 'YES','NO'], description: 'Does Java 11 need an upgrade ?', name: 'optJDK11'),
+      choice (choices: ['SELECT', 'YES','NO'], description: 'Does Oracle Java 17 need an upgrade ?', name: 'optJDK17'),
+      choice (choices: ['SELECT', 'YES','NO'], description: 'Does Open Java 17 need an upgrade ?', name: 'OpenJDK17'),
+      string(defaultValue: 'jdk1.8.0_361', description: 'Enter the OLD JDK version as jdk1.8.0_351; Please fill if java 8 is getting upgraded', name: 'old_jdk8_version', trim: true),
+      string(defaultValue: 'jdk1.8.0_371', description: 'Enter the NEW JDK version as jdk1.8.0_361; Please fill if java 8 is getting upgraded', name: 'new_jdk8_version', trim: true),
+      string(defaultValue: 'jdk-11.0.18', description: 'Enter the OLD JDK version as jdk-11.0.17; Please fill if java 11 is getting upgraded', name: 'old_jdk11_version', trim: true),
+      string(defaultValue: 'jdk-11.0.19', description: 'Enter the NEW JDK version as jdk-11.0.18; Please fill if java 11 is getting upgraded', name: 'new_jdk11_version', trim: true),
+      string(defaultValue: 'jdk-17.0.7', description: 'Enter the OLD Oracle JDK version as jdk-17.0.6; Please fill if java 17 is getting upgraded', name: 'old_jdk17_version', trim: true),
+      string(defaultValue: 'jdk-17.0.8', description: 'Enter the NEW Oracle JDK version as jdk-17.0.7; Please fill if java 17 is getting upgraded', name: 'new_jdk17_version', trim: true),
+      string(defaultValue: 'jdk-17', description: 'Enter the OLD Open JDK version as jdk-17; Please fill if open java 17 is getting upgraded', name: 'old_openjdk17_version', trim: true),
+      string(defaultValue: 'jdk-17', description: 'Enter the NEW Open JDK version as jdk-17; Please fill if open java 17 is getting upgraded', name: 'new_openjdk17_version', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/jdk-8u361-linux-x64.tar.gz', description: 'Enter the JDK-8 artifactory URL, if applicable', name: 'art8_url', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/jdk-11.0.18_linux-x64_bin.tar.gz', description: 'Enter the JDK-11 artifactory URL, if applicable', name: 'art11_url', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/jdk-17_linux-x64_bin.tar.gz', description: 'Enter the JDK-17 artifactory URL, if applicable', name: 'art17_url', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/openjdk-17+35_linux-x64_bin.tar.gz', description: 'Enter the Open JDK-17 artifactory URL, if applicable', name: 'artOpen17_url', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/new_san_root.cer', description: 'Root cert URL', name: 'root_url', trim: true),
+      string(defaultValue: 'https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/new_san_inter.cer', description: 'Inter cert URL', name: 'inter_url', trim: true),
+      string(defaultValue: '', description: 'Enter the Change Number', name: 'ChangeNumber', trim: true),
+      string(defaultValue: '', description: 'Enter if pre_install is done already, else ignore.', name: 'BuildNumber', trim: true),
+      [$class: 'ChoiceParameter',
+                  choiceType: 'PT_CHECKBOX',
+                  description: 'Choose what need to perform!',
+                  name: 'Steps',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['Pre_Install', 'Upgrade', 'Restart']
+                                  '''
+                              ]
+                      ]
+              ]
+            ])
+          ])
+        }
+      }
+    }
+
+
+    stage("Ansible") {
+    //agent { node { label "py27-ansible2-9-ora12c" } } // ## For HigherRegions
+    //agent { node { label "ansible" } }  //## Scrum region
+      steps {
+        script {
+          if( "${ChangeNumber}" == "" ) {
+              echo "Change number is empty. Exiting!!"
+              //break
+              exit 1
+          }
+          if ( ( Serverset.equals("Specific_Server") ) && ( "${Specific_Server_list}" == "" ) ) {
+            echo "Enter the Server list if Specific_Server_list option selected"
+            exit 1
+          }
+           if ("${BuildNumber}" == "") {
+             echo "${BuildNumber}"
+             BuildNumber = "${BUILD_NUMBER}"
+             }
+            echo "${BuildNumber}"
+          
+          String [] ServerGroup;
+
+          def QA_set1 = [ 'vlcaprteapp01', 'vlmazglrpyqaap1',  'vlmaztrilscrum1',  'vlcapdsmsqcap2',  'vlcapdsidqcap1',  'vlcapdstpapp01', 'vlltcdesoqcap03', 'vlcapdsmsqcap1', 'vlmazmsqaapp01' ]
+          def QA_set2 = [ 'vlmazglrpyqaap2', 'vlmaztrilscrum2', 'vlcapdsidqcap2', 'vlcapdstpapp02', 'vlltcdesoqcap04', 'vlcapdsmsdevap1', 'vlcapdsiddevap1', 'vlmazglrpydvap1', 'vlcapdsmsqcap3', 'vlmazmsqaapp02' ]
+
+          def UAT_set1 = [ 'lrk4rsgdippap01', 'lrk8rrcpcxsap01', 'lrk8rrcpcxswb01', 'pdc8rnaridcap01', 'pdc8rnaridvap01', 'pdc8rrcpcxiwb01', 'pdc8rrcpdstap01', 'lrk8rdstlmap01' ]
+          def UAT_set2 = [ 'lrk4rsgdippap02', 'lrk8rrcpcxsap02', 'lrk8rrcpcxswb02', 'pdc8rnaridcap02', 'pdc8rnaridvap02', 'pdc8rrcpcxiwb02', 'pdc8rrcpdstap02', 'pdc8rnarcbpap01', 'lrk8rdstlmap02']
+
+          def PROD_set1 = [ 'lrk1rrcpcxsap01', 'lrk1rrcpcxswb01', 'bdc1rnaridcap01', 'bdc1rnaridvap01', 'lrk1rdstlmap01', 'lrk1rrcpcxiwb01', 'bdc1rnarcbpap01', 'lrk1rsgdippap01', 'lrk1rrcpdstap01' ]
+          def PROD_set2 = [ 'lrk1rrcpcxsap02', 'lrk1rrcpcxswb02', 'bdc1rnaridcap02', 'bdc1rnaridvap02', 'lrk1rdstlmap02', 'lrk1rrcpcxiwb02', 'bdc1rnarcbpap02', 'lrk1rsgdippap02', 'lrk1rrcpdstap02' ]
+
+          def DR_set1 = ['pdc1rdstlmap01', 'pdc1rnaridvap01', 'pdc2rnarcbpap01', 'pdc2rnaridcap01', 'pdc2rrcpcxiwb01', 'pdc2rrcpcxsap01', 'pdc2rrcpcxswb01', 'pdc2rrcpdstap01']
+          def DR_set2 = ['pdc1rdstlmap02', 'pdc1rnaridvap02', 'pdc2rnarcbpap02', 'pdc2rnaridcap02', 'pdc2rrcpcxiwb02', 'pdc2rrcpcxsap02', 'pdc2rrcpcxswb02', 'pdc2rrcpdstap02']
+
+          //Servers = params.Servers.trim()
+          if ( ( Region.equals("QA") ) && ( Serverset.equals("Set1") ) ) {
+            
+            ServerGroup = QA_set1
+
+          } else if ( ( Region.equals("QA") ) && ( Serverset.equals("Set2") ) ) {
+            
+            ServerGroup = QA_set2
+
+          } else if ( ( Region.equals("QA") ) && ( Serverset.equals("Specific_Server" ) ) ) {
+                  
+                  String server =  "${Specific_Server_list}";
+                  ServerGroup = server.split(',');
+
+          } else if ( ( Region.equals("UAT") ) && ( Serverset.equals("Set1") ) ) {
+            
+            ServerGroup = UAT_set1
+
+          } else if ( ( Region.equals("UAT") ) && ( Serverset.equals("Set2") ) ) {
+            
+            ServerGroup = UAT_set2
+
+          } else if ( ( Region.equals("UAT") ) && ( Serverset.equals("Specific_Server" ) ) ) {
+                  
+                  String server =  "${Specific_Server_list}";
+                  ServerGroup = server.split(',');
+
+          } else if ( ( Region.equals("PROD") ) && ( Serverset.equals("Set1") ) ) {
+            
+            ServerGroup = PROD_set1
+
+          } else if ( ( Region.equals("PROD") ) && ( Serverset.equals("Set2") ) ) {
+            
+            ServerGroup = PROD_set2
+
+          } else if ( ( Region.equals("PROD") ) && ( Serverset.equals("Specific_Server" ) ) ) {
+                  
+                  String server =  "${Specific_Server_list}";
+                  ServerGroup = server.split(',');
+
+          } else if ( ( Region.equals("DR") ) && ( Serverset.equals("Set1") ) ) {
+            
+            ServerGroup = DR_set1
+
+          } else if ( ( Region.equals("DR") ) && ( Serverset.equals("Set2") ) ) {
+            
+            ServerGroup = DR_set2
+
+          } else if ( ( Region.equals("DR") ) && ( Serverset.equals("Specific_Server" ) ) ) {
+                  
+                  String server =  "${Specific_Server_list}";
+                  ServerGroup = server.split(',');
+
+          }
+          println "=======>> INFO:: Change Number - ${ChangeNumber}"
+          println "=======>> INFO:: Environment - ${Region}"
+          //println "INFO:: Server name - ${Servers}"
+          withCredentials([
+            usernamePassword(credentialsId: 'dsartifactory_id', passwordVariable: 'repopwd', usernameVariable: 'repouser') ]) {
+              for ( servers in ServerGroup ) {
+                if ( "${servers}" == "vlcapdsiddevap1" || "${servers}" == "vlcapdsidqcap1" || "${servers}" == "vlcapdsidqcap2" || "${servers}" == "vlcapdsmsdevap1" || "${servers}" == "vlcapdsmsqcap1" || "${servers}" == "vlcapdsmsqcap2" || "${servers}" == "vlcapdsmsqcap3" || "${servers}" == "vlcapdstpapp01" || "${servers}" == "vlcapdstpapp02" || "${servers}" == "vlltcdesoqcap03" || "${servers}" == "vlltcdesoqcap04" || "${servers}" == "vlmazglrpydvap1" || "${servers}" == "vlmazglrpyqaap1" || "${servers}" == "vlmazglrpyqaap2" || "${servers}" == "vlmaztrilscrum1" || "${servers}" == "vlmaztrilscrum2" || "${servers}" == "lrk8rdstlmap01" || "${servers}" == "lrk8rdstlmap02" || "${servers}" == "lrk8rrcpcxsap01" || "${servers}" == "lrk8rrcpcxsap02" || "${servers}" == "pdc8rnaridcap01" || "${servers}" == "pdc8rnaridcap02" || "${servers}" == "pdc8rnaridvap01" || "${servers}" == "pdc8rnaridvap02" || "${servers}" == "pdc8rrcpcxiwb01" || "${servers}" == "pdc8rrcpcxiwb02" || "${servers}" == "pdc8rrcpdstap01" || "${servers}" == "pdc8rrcpdstap02" || "${servers}" == "lrk1rrcpcxsap01"  || "${servers}" == "lrk1rrcpcxsap02"  || "${servers}" == "bdc1rnaridcap01"  || "${servers}" == "bdc1rnaridcap02"  || "${servers}" == "bdc1rnaridvap01"  || "${servers}" == "bdc1rnaridvap02"  || "${servers}" == "lrk1rdstlmap01"  || "${servers}" == "lrk1rdstlmap02"  || "${servers}" == "lrk1rrcpcxiwb01"  || "${servers}" == "lrk1rrcpcxiwb02"  || "${servers}" == "lrk1rrcpdstap01"  || "${servers}" == "lrk1rrcpdstap02" ||  "${servers}" == "pdc2rrcpcxsap01" || "${servers}" == "pdc2rrcpcxsap02" || "${servers}" == "pdc2rnaridcap01" || "${servers}" == "pdc2rnaridcap02" || "${servers}" == "pdc1rnaridvap01" || "${servers}" == "pdc1rnaridvap02" || "${servers}" == "pdc1rdstlmap01" || "${servers}" == "pdc1rdstlmap02" || "${servers}" == "pdc2rrcpcxiwb01" || "${servers}" == "pdc2rrcpcxiwb02" || "${servers}" == "pdc2rrcpdstap01" || "${servers}" == "pdc2rrcpdstap02" || "${servers}" == "vlmazmsqaapp01" || "${servers}" == "vlmazmsqaapp02" ) {
+                  creds_id="jenkins_dsappadm"
+                } else if ( "${servers}" ==  "pdc8rnarcbpap01" || "${servers}" == "bdc1rnarcbpap01" || "${servers}" == "bdc1rnarcbpap02" || "${servers}" == "pdc2rnarcbpap01" || "${servers}" == "pdc2rnarcbpap02" ) {
+                  creds_id="jenkins_dsbatch_ops"
+                } else if ( "${servers}" ==  "vlcaprteapp01" || "${servers}" == "lrk4rsgdippap01" || "${servers}" == "lrk4rsgdippap02" || "${servers}" == "lrk1rsgdippap01" || "${servers}" == "lrk1rsgdippap02" ) {
+                  creds_id="jenkins_tomcat"
+                } else if ( "${servers}" ==  "lrk8rrcpcxswb01" || "${servers}" == "lrk8rrcpcxswb02" || "${servers}" == "lrk1rrcpcxswb01" || "${servers}" == "lrk1rrcpcxswb02" || "${servers}" == "pdc2rrcpcxswb01" || "${servers}" == "pdc2rrcpcxswb02" ) {
+                  creds_id="jenkins_dswebadmin"
+                } else if ( "${servers}" ==  "lrk8rdsdqtap01" ) {
+                  creds_id="tssadmin"
+                }
+
+                echo "<<<<<<<<<<====================================================================>>>>>>>>>>"
+                echo "INFO: Running on ${servers}"
+                ansiblePlaybook (
+                  playbook: "MSJava/playbook.yml",
+                  inventory: "MSJava/${Region}/${servers}",
+                  disableHostKeyChecking: true,
+                  credentialsId: "${creds_id}",
+                  tags: "${Steps}",
+                  extraVars: [
+                    repouser: "${repouser}",
+                    repopwd: "${repopwd}",
+                    old_8vrsn: "${old_jdk8_version}",
+                    new_8vrsn: "${new_jdk8_version}",
+                    old_11vrsn: "${old_jdk11_version}",
+                    new_11vrsn: "${new_jdk11_version}",
+                    old_17vrsn: "${old_jdk17_version}",
+                    new_17vrsn: "${new_jdk17_version}",
+                    old_open17vrsn: "${old_openjdk17_version}",
+                    new_open17vrsn: "${new_openjdk17_version}",
+                    isJava8: "${env.optJDK8}",
+                    isJava11: "${env.optJDK11}",
+                    isJava17: "${env.optJDK17}",
+                    isOpenJava17: "${env.OpenJDK17}",
+                    bld_no: "${BuildNumber}",
+                    change_no: "${ChangeNumber}",
+                    art8_url: "${art8_url}",
+                    art11_url: "${art11_url}",
+                    art17_url: "${art17_url}",
+                    artOpen17_url: "${artOpen17_url}",
+                    root_url: "${root_url}",
+                    inter_url: "${inter_url}"
+
+                  ]
+                )
+                echo "=======>> INFO: Completed on ${servers}"
+              }
+           }
+        }
+      }
+    }
+  }
+}
