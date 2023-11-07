@@ -1,0 +1,50 @@
+pipeline {
+  agent { node { label "ansible" } }
+  stages {
+    stage ('Parameters') {
+      steps {
+        script {
+          properties ([
+            parameters([
+              string(defaultValue: '', description: 'Enter the ChangeNumber', name: 'ChangeNumber' ),
+              [$class: 'CascadeChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the environment',
+                  name: 'Region',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return error '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  EnvList = ['SELECT:selected', 'DEV', 'QC', 'UAT', 'PROD', 'DR']
+                                  return EnvList
+                                  '''
+                              ]
+                      ]
+              ]
+            ])
+          ])
+        }
+      }
+    }
+
+    stage('Execution') {
+      steps {
+        script {
+          println "<<===============================================================>>"
+          println "INFO:: Change Number - ${ChangeNumber}"
+          println "INFO:: Environment - ${Region}"
+          println ""
+        }
+      }
+    }
+  }
+}
+
+
+
