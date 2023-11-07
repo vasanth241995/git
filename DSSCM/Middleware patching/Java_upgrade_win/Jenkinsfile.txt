@@ -1,0 +1,200 @@
+//EIMS
+node ('ansible')
+//node ('py27-ansible2-9-ora12c')
+{
+
+properties([parameters([
+credentials(credentialType: 'com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl', defaultValue: '', description: '', name: 'login_user', required: true),
+[$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the environment carefully before triggering the build ',
+                  name: 'Environment',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['UAT', 'PROD','DR']
+                                  '''
+                              ]
+                      ]
+              ],
+[$class: 'CascadeChoiceParameter', 
+            choiceType: 'PT_SINGLE_SELECT', 
+            description: 'Choose the Server to Deploy', filterLength: 1, filterable: false, 
+            name: 'Server_list', randomName: 'choice-parameter-7144585859476300', referencedParameters: 'Environment', 
+            script: [$class: 'GroovyScript', fallbackScript: [classpath: [], oldScript: '', sandbox: true, script: ''], 
+            script: [classpath: [], oldScript: '', sandbox: true, script: '''
+if (Environment == "UAT") {
+   return ["PDC8WRCPCXIAP01","Specific_Server"]
+}
+if (Environment == "PROD") {
+   return ["LRK1WRCPCXIAP01","Specific_Server"]
+}
+if (Environment == "DR") {
+  return ["PDC2WRCPCXIAP01","Specific_Server"]
+}''']]],
+text(defaultValue: '', description: 'Enter the Server name only if Specific_Server option selected, Otherwise not required. Also, if its multiple server name please separate it by comma (,)', name: 'Specific_Server'),
+[$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the processor type',
+                  name: 'Processor_Type',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['32-bit', '64-bit']
+                                  '''
+                              ]
+                      ]
+              ],
+choice (choices: ['SELECT', 'YES','NO'], description: 'Java 8 needs an upgrade ?', name: 'optJDK8'),
+choice (choices: ['SELECT', 'YES','NO'], description: 'Java 11 needs an upgrade ?', name: 'optJDK11'),
+string(defaultValue: '', description: 'Enter the old java 8 version. ex: 1.8.0_201 (Incase you want to upgrade java 8)', name: 'old_java8_version', trim: false),
+string(defaultValue: '', description: 'Enter the new java 8 version. ex: 1.8.0_361 (Incase you want to upgrade java 8)', name: 'new_java8_version', trim: false),
+string(defaultValue: '', description: 'Enter the old java 11 version. ex: 11.0.12 (Incase you want to upgrade java 11)', name: 'old_java11_version', trim: false),
+string(defaultValue: '', description: 'Enter the new java 11 version. ex: 11.0.17 (Incase you want to upgrade java 11)', name: 'new_java11_version', trim: false),
+string(defaultValue: '', description: 'Enter the exact .exe file name for java 8 that you want to deploy from Jfrog.', name: 'Executable_name_java8', trim: false),
+string(defaultValue: '', description: 'Enter the exact .exe file name for java 11 that you want to deploy from Jfrog.', name: 'Executable_name_java11', trim: false),
+string(defaultValue: '', description: 'Enter the exact root cert name that you want to import from Jfrog.', name: 'Root_cert', trim: false),
+string(defaultValue: '', description: 'Enter the exact intermediate cert name that you want to import from Jfrog.', name: 'Inter_cert', trim: false),
+[$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose the java home type for Java 8 ',
+                  name: 'HOME_TYPE',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['JAVA_HOME', 'JRE_HOME']
+                                  '''
+                              ]
+                      ]
+              ],
+[$class: 'ChoiceParameter',
+                  choiceType: 'PT_SINGLE_SELECT',
+                  description: 'Choose what need to perform!',
+                  name: 'Deployment_Type',
+                  script:
+                      [$class: 'GroovyScript',
+                      fallbackScript: [
+                              classpath: [],
+                              sandbox: true,
+                              script: ''' return ['error'] '''
+                              ],
+                      script: [
+                          sandbox: true,
+                          script: '''
+                                  return ['Upgrade', 'Rollback']
+                                  '''
+                              ]
+                      ]
+              ],
+string(defaultValue: '', description: '''Kindly provide the group email id which should receive the notification after the dotnet upgrade. 
+ex: xxxxx@fisglobal.com''', name: 'Email_Notification', trim: true),
+string(defaultValue: '', description: 'Enter the change ticket number associated with this installation.', name: 'Change_Number', trim: false)])])
+Server_ls = "${params.Server_list}"
+if (Server_ls == "Specific_Server")
+{
+server = "${Specific_Server}"
+}
+else
+{
+server = "${params.Server_list}"
+}
+def ser = server.tokenize('\\,')
+def items = "${params.Processor_Type}".tokenize('\\,')
+
+stage ("validation"){  
+script{
+         skipRemainingStages = true
+         if ( Change_Number.isEmpty() ) {
+           sh 'Failed because you have passed empty values to : ChangeNumber'
+          skipRemainingStages = false
+          }  
+          if (server.isEmpty() ) {
+             sh 'Failed because you have passed empty values: server'
+             skipRemainingStages = false
+		  }  
+          if (login_user.isEmpty() ) {
+            sh 'Failed because you have passed empty values: login user'
+            skipRemainingStages = false
+		  }  
+          if (Email_Notification.isEmpty() ) {
+            sh 'Failed because you have passed empty values: Email_notification'
+            skipRemainingStages = false
+		  }  
+          if ( "YES" in optJDK8 ) {
+            if ( old_java8_version.isEmpty() || new_java8_version.isEmpty() || Executable_name_java8.isEmpty() || HOME_TYPE.isEmpty ) {
+            sh 'Failed because you have passed empty values: old_java8_version/new_java8_version/Executable_name_java8'
+            skipRemainingStages = false
+          }
+          
+          if ( "YES" in optJDK11 ) {
+            if ( old_java11_version.isEmpty() || new_java11_version.isEmpty() || Executable_name_java11.isEmpty() ) {
+            sh 'Failed because you have passed empty values: old_java11_version/new_java11_version/Executable_name_java11'
+            skipRemainingStages = false
+          }   
+     }
+}
+
+stage("Deployment")
+{
+checkout scm
+for(i in items)
+{
+  echo i
+}
+login_user="${login_user}"
+withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: login_user,
+usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]){
+ansiblePlaybook(
+playbook: "Java_upgrade_win/Java_main.yml",
+//playbook: "Java_upgrade_win/Sample_upgrade.yml",
+inventory: "Java_upgrade_win/hosts_java.ini",
+vaultCredentialsId: "1a3f9998-340e-43d1-bf10-02fa7442cad1",
+extraVars: [
+login_user: USERNAME,
+login_password: PASSWORD,
+env: params.Environment,
+Server_Name: server,
+ser:ser[0],
+Processor_Type: env.Processor_Type,
+optJDK8: env.optJDK8,
+optJDK11: env.optJDK11,
+old_java8_version: env.old_java8_version,
+new_java8_version: env.new_java8_version,
+old_java11_version: env.old_java11_version,
+new_java11_version: env.new_java11_version,
+Executable_name_java8: env.Executable_name_java8,
+Executable_name_java11: env.Executable_name_java11,
+Root_cert: env.Root_cert,
+Inter_cert: env.Inter_cert,
+HOME_TYPE: env.HOME_TYPE,
+Deployment_Type: env.Deployment_Type,
+Change_Number: env.Change_Number,
+Email_Notification: env.Email_Notification
+]
+        )
+    }
+}
+}
+}
+}
