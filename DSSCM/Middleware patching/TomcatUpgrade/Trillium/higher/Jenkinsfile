@@ -1,0 +1,104 @@
+//Tomcat_Upgrade
+pipeline {
+
+  agent {
+    node {
+      label "py27-ansible2-9-ora12c"
+    }
+  }
+
+  parameters {
+    string defaultValue: 'X.X.XX', description: 'Enter the OLD Tomcat version', name: 'old_version', trim: true
+    string defaultValue: '9.0.75', description: 'Enter the NEW Tomcat version', name: 'new_vrsn', trim: true
+    choice choices: ['SELECT', 'UAT', 'PROD', 'DR'], description: 'Choose the environment', name: 'Environment'
+    string defaultValue: 'https://archive.apache.org/dist/tomcat/tomcat-9/v9.x.xx/bin/apache-tomcat-9.x.xx.tar.gz', description: 'Enter the Tomcat download URL ending with tar.gz', name: 'tmct_url', trim: true
+    string defaultValue: '', description: 'Enter the Change Number', name: 'ChangeNumber', trim: true
+  }
+
+  environment {
+    uat_servers = 'LRK8RDSTLMAP01.prod.local,LRK8RDSTLMAP02.prod.local'
+    prod_servers = 'LRK1RDSTLMAP01.prod.local,LRK1RDSTLMAP02.prod.local'
+    dr_servers = 'PDC1RDSTLMAP01.prod.local,PDC1RDSTLMAP02.prod.local'
+  }
+
+  stages {
+
+    stage("Definition") {
+      steps {
+        script {
+
+          release_path = "/appl/SCMSupport/Releases"
+          backup_path = "/appl/SCMSupport/Backup"
+
+          if (env.Environment == "UAT") {
+            UAT_SERVERS = uat_servers.tokenize(',')
+            ServerGroup = UAT_SERVERS
+            slct_inv = "uat.ini"
+            superuser = "tssadmin"
+            zone = "uat"
+            creds_id1 = "tssadmin"
+            proxy_url = "proxy.prod.local:8080"
+          } else if (env.Environment == "PROD") {
+            PROD_SERVERS = prod_servers.tokenize(',')
+            ServerGroup = PROD_SERVERS
+            slct_inv = "prod.ini"
+            superuser = "tssadmin"
+            zone = "prod"
+            creds_id1 = "tssadmin"
+            proxy_url = "proxy.prod.local:8080"
+          } else if (env.Environment == "DR") {
+            DR_SERVERS = dr_servers.tokenize(',')
+            ServerGroup = DR_SERVERS
+            slct_inv = "dr.ini"
+            superuser = "tssadmin"
+            zone = "dr"
+            creds_id1 = "tssadmin"
+            proxy_url = "proxy.prod.local:8080"
+          }
+        }
+      }
+    }
+
+    stage("Pre-Install") {
+      steps {
+        script {
+          withCredentials([sshUserPrivateKey(credentialsId: "${creds_id1}", keyFileVariable: 'ssh_key')]) {
+            if ("${ChangeNumber}" == "") {
+              error("Change number is empty. Exiting")
+            }
+            echo "INFO: Downloading Tomcat"
+            sh "export http_proxy=$proxy_url && export https_proxy=$proxy_url && wget --quiet ${tmct_url} -O ${new_vrsn}.tgz --no-check-certificate"
+            for (server in ServerGroup) {
+              echo "INFO: Transferring Artifacts"
+              sh "ssh -i ${ssh_key} -q -o StrictHostKeyChecking=no ${superuser}@${server} mkdir -p ${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+              sh "scp -i ${ssh_key} -o StrictHostKeyChecking=no ${new_vrsn}.tgz ${superuser}@${server}:${release_path}/${ChangeNumber}/${BUILD_NUMBER}/"
+              sh "ssh -i ${ssh_key} -q -o StrictHostKeyChecking=no ${superuser}@${server} ls ${release_path}/${ChangeNumber}/${BUILD_NUMBER}"
+              echo "INFO: Artifacts transferred in ${server}"
+            }
+          }
+        }
+      }
+    }
+
+    stage("Upgrade") {
+      steps {
+        script {
+          echo "INFO: Executing playbook."
+          ansiblePlaybook(
+            playbook: "TomcatUpgrade/Trillium/playbook.yml",
+            inventory: "TomcatUpgrade/Trillium/higher/$slct_inv",
+            credentialsId: "${creds_id1}",
+            //extras: "-v",
+            extraVars: [
+              zone: "${zone}",
+              new_vrsn: "${new_vrsn}",
+              old_vrsn: "${old_version}",
+              bld_no: "${BUILD_NUMBER}",
+              change_no: "${ChangeNumber}",
+            ]
+          )
+        }
+      }
+    }
+  }
+}
