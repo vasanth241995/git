@@ -1,0 +1,55 @@
+- name: Selection
+  hosts: UAT
+  vars:
+    ansible_user: "{{ login_user }}"
+    ansible_password: "{{ login_password }}"
+    ansible_port: 5985
+    ansible_winrm_transport: ntlm
+    ansible_connection: "winrm"
+    ansible_winrm_server_cert_validation: ignore
+  tasks:
+  - name: Creating folder to store the files from Jfrog
+    win_file:
+     path: D:\SCMSupport\Releases\08Aug23_Chexinsights
+     state: directory
+     mode: u=rwx,g=rwx,o=rwx
+  - name: downlaod java 8 exe from Jfrog
+    win_get_url:
+     url: "https://artifactory.fis.dev/artifactory/dsd-maven-snapshot-local/jdk-17.0.7_windows-x64_bin (2).zip"
+     dest: D:\SCMSupport\Releases\08Aug23_Chexinsights\
+     url_username: Svc-dsd-cicd
+     url_password: "AKCp8ohoBfpQ1AxHiKb1hqaLhdZAabKp6uoTbzB8rH1f61S8owCBaAAB8ZDREGJ2oY26LgWyu"
+     proxy_url: http://proxy.prod.local:8080
+     use_proxy: yes
+     timeout: 1800
+  #  - name: Check Java 8 version
+  #    win_shell: 'reg query "HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\Java Runtime Environment\1.8" /v JavaHome'
+  #    register: java8
+
+    #- name: Print JDK versions
+      #debug:
+        #msg: "Java 8 version is {{ java8.stdout | regex_replace('JavaHome    REG_SZ    ', '') }}"
+        
+    #- name: Extract Java version
+      #set_fact:
+        #java8_version: "{{ java8.stdout | regex_search('1.8.0_\\d+') }}"
+        
+    #- name: Print Java version
+      #debug:
+        #var: java8_version
+        
+    #- name: Check Java 11 JDK version
+      #win_shell: 'reg query "HKEY_LOCAL_MACHINE\SOFTWARE\JavaSoft\JDK" /s /f "JavaHome"'
+      #register: jdk11
+      
+    #- name: Print JDK versions
+      #debug:
+        #msg: "Java 11 JDK version is {{ jdk11.stdout | regex_replace('JavaHome    REG_SZ    ', '') }}"
+
+    #- name: Extract Java version
+      #debug:
+        #msg: "{{ jdk11.stdout | regex_search('(\\d+\\.\\d+\\.\\d+)') }}"
+        
+    #- name: Print Java version
+      #debug:
+        #var: java11_version
