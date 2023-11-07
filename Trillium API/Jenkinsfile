@@ -1,0 +1,149 @@
+// Trillium API
+
+import static java.util.Calendar.YEAR
+node('swarm-slave') {
+
+properties(
+[parameters(
+[choice(
+choices: ['UAT/STAGE', 'PRODUCTION', 'DR'], description: 'Choose the environment carefully before triggering the build ', name: 'Environment'), string(defaultValue: '', description: 'Enter the Release version to get deployed', name: 'version', trim: true), string(defaultValue: '', description: 'Enter the Change number deployed', name: 'ChangeNumber', trim: true), choice(
+choices: ['JAR', 'CONFIG', 'BOTH'], description: 'What needs to be deployed ', name: 'which_arti')]
+        )
+    ]
+)
+
+// Please enter the below values as per environment and application
+def artifactid = "trillium-api"
+def appbase = "/appl/trilapi"
+def deploybase = "/appl/SCMSupport/${artifactid}/${version}_${ChangeNumber}_${BUILD_NUMBER}/Releases"
+def backupbase = "/appl/SCMSupport/${artifactid}/${version}_${ChangeNumber}_${BUILD_NUMBER}/Backup"
+
+UATSERVERS = [ "lrk8rdstlmap01.prod.local", "lrk8rdstlmap02.prod.local" ]
+PRODSERVERS = [ "lrk1rdstlmap01.prod.local" , "lrk1rdstlmap02.prod.local" ]
+DRSERVERS = [ "pdc1rdstlmap01.prod.local" , "pdc1rdstlmap02.prod.local" ]
+
+def superuser = "dsappadm"
+
+String [] ServerGroup;
+
+if (env.Environment == "UAT/STAGE") {
+    ServerGroup = UATSERVERS
+} else if (env.Environment == "PRODUCTION") {
+    ServerGroup = PRODSERVERS
+} else if (env.Environment == "DR") {
+    ServerGroup = DRSERVERS
+}
+
+// Defining time
+
+def now = new Date()
+def time = now.format("MM_dd_yy_hhmmss", TimeZone.getTimeZone('CST6CDT'))
+
+//Stages to define deployment action
+stage('Download Artifact') {
+  deleteDir()
+  echo 'Downloading Artifacts'
+  withCredentials([usernamePassword(credentialsId: 'dsartifactory_id', passwordVariable: 'repopwd', usernameVariable: 'repouser')]) {
+    if ( env.which_arti == "JAR" || env.which_arti == "BOTH" ) {
+      sh "export http_proxy=http://10.236.253.71:8080 && \
+      export https_proxy=http://10.236.253.71:8080 && \
+      wget --auth-no-challenge --user=$repouser --password=$repopwd https://artifactory.fis.dev/artifactory/ds-maven-release-local/com/fisglobal/trillium/${artifactid}/${version}/${artifactid}-${version}.jar --no-check-certificate"
+    }
+    if ( env.which_arti == "CONFIG" || env.which_arti == "BOTH" ) {
+      sh "export http_proxy=http://10.236.253.71:8080 && \
+      export https_proxy=http://10.236.253.71:8080 && \
+      wget --auth-no-challenge --user=$repouser --password=$repopwd https://artifactory.fis.dev/artifactory/ds-maven-release-local/com/fisglobal/trillium/${artifactid}/${version}/${artifactid}-${version}-config.tar --no-check-certificate"
+    }
+  }
+} // end of stage download
+
+withCredentials([sshUserPrivateKey(credentialsId: "jenkins_dsappadm", keyFileVariable: 'ssh_key')]) {
+  script {
+    def serverFlag=false
+    def serverFailedToStart
+
+    for (server in ServerGroup) {
+      if(serverFlag==false) {
+        stage('Prepare Environment') {
+          echo "Creating Remote Directories"
+          sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} mkdir -p ${deploybase} ${backupbase}"
+          if (env.which_arti == "CONFIG" || env.which_arti == "BOTH") {
+            echo "Taking backup of configs"
+            sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} cp -rf ${appbase}/config ${backupbase}/config"
+            echo "Transferring jar artifacts to remote servers"
+            sh "scp -i ${ssh_key} ${artifactid}-${version}-config.tar ${superuser}@${server}:${deploybase}/${artifactid}-config.tar"
+          }
+          if (env.which_arti == "JAR" || env.which_arti == "BOTH") {
+            echo "Taking JAR backup"
+            sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} cp -prf ${appbase}/${artifactid}*.jar ${backupbase}/"
+            echo "Transferring config artifacts to remote servers"
+            sh "scp -i ${ssh_key} ${artifactid}-${version}.jar ${superuser}@${server}:${deploybase}/${artifactid}.jar"
+          }
+        }
+        stage ('Deploy') {
+          if (env.which_arti == "CONFIG" || env.which_arti == "BOTH") {
+            sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} tar xvf ${deploybase}/${artifactid}-config.tar -C ${appbase}/config/"
+            echo "Configs deployed"
+          }
+          if (env.which_arti == "JAR" || env.which_arti == "BOTH") {
+            sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} cp -f ${deploybase}/${artifactid}.jar ${appbase}/"
+            echo "JAR deployed"
+          }
+        stage ('Stop and Start') {
+          withEnv(['JENKINS_NODE_COOKIE=dontkillMe']) {
+            sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} ${appbase}/stop_auto.sh ${artifactid}"
+            sleep (5)
+            def d = sh script: "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} BUILD_ID=dontKillMe ${appbase}/start_auto.sh", returnStdout: true
+            def e = d.trim()
+            echo "print e"
+            echo e
+            if (e == "The script ran ok") {
+              echo "Started Successfully"
+            }
+            else {
+              echo "Server Startup not success"
+              //serverFlag=true
+              serverFailedToStart=server
+              echo serverFailedToStart
+            }
+          }
+        } //end of stage stop start
+        } //end of stage deploy
+      } // end of if serverflag
+    } //end of for
+
+  if(serverFlag==true && serverFailedToStart==ServerGroup[0]) {
+    stage ('Rollback single server') {
+      sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${ServerGroup[0]} ${appbase}/stop_auto.sh ${artifactid}"
+      sleep (2)
+      if (env.which_arti == "CONFIG" || env.which_arti == "BOTH") {
+        echo "Rolling back conf from backup location"
+        sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${ServerGroup[0]} cp -rf ${backupbase}/config/* ${appbase}/config/"
+      }
+      if (env.which_arti == "JAR" || env.which_arti == "BOTH") {
+        echo "Rolling back JAR from backup location"
+        sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${ServerGroup[0]} cp -rf ${backupbase}/${artifactid}.jar ${appbase}/${artifactid}.jar"
+      }
+      sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${ServerGroup[0]} ${appbase}/start_auto.sh"
+    } // end single rollback stage
+  } // end of if server group 0
+  if(serverFlag==true && serverFailedToStart==ServerGroup[1]) {
+    stage ('Rollback both nodes') {
+      for (server in ServerGroup) {
+        sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} ${appbase}/stop_auto.sh ${artifactid}"
+        sleep (2)
+        if (env.which_arti == "CONFIG" || env.which_arti == "BOTH") {
+          echo "Rolling back conf from backup location"
+          sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} cp -rf ${backupbase}/config/* ${appbase}/config/"
+        }
+        if (env.which_arti == "JAR" || env.which_arti == "BOTH") {
+          echo "Rolling back JAR from backup location"
+          sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} cp -rf ${backupbase}/${artifactid}.jar ${appbase}/${artifactid}.jar"
+        }
+        sh "ssh -q -o StrictHostKeyChecking=no -i ${ssh_key} ${superuser}@${server} ${appbase}/start_auto.sh"
+        }
+    } // end both rollback stage
+  } //end of if server group1
+ } // end of with creds
+} //end of script
+} //end of node
