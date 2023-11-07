@@ -1,3 +1,0 @@
-
-    - name: Starting with installation
-      include_tasks: Upgrade.yml
