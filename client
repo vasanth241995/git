@@ -1,0 +1,42 @@
+ClinetVue QA Deployment:
+Server name QA: vlcaprteapp01.fisdev.local -- 10.7.12.189
+User: sudo su – tomcat
+
+1.	Check the latest release in the Teams and copy the link.
+2.	Download the URL: Paste the link in browser, click download and cancel immediately. Using the Developer tools copy that download document as cURL (Bash) as curl command. Refer the below Screenshot 
+3.	Paste the copied curl command in Notepad, then edit as the below (Adding proxy to download is only for QC):
+
+Path: /data/SCMSupport/Releases/08SEP2023
+curl -x http://proxy.fisdev.local:8080 <Download URL> -o <Zip File Name > 
+4.	Take the backup of the webapps folder:
+Path:   /data/SCMSupport/Backup/08Sep23
+using tar cvf clientgateway.tgz /data/ClientVue/ClientVue_QA/webapps/  
+
+5.	Before making the changes stop the tomcat Path:   /data/ClientVue/ClientVue_QA/bin/  
+stop the tomcat using ./shutdown.sh. 
+6.	ps -ef | grep <process-id>
+7.	If it not stops properly kill the process using; kill -9 <process-id>
+
+8.	Unzip that file Path: /data/SCMSupport/Release/08SEP23
+9.	cd /data/ClientVue/ClientVue_QA/webapps/; ls -lrt
+10.	rm -rf clientgateway.war clientgateway
+11.	ls -lrt
+12.	path: /data/ClientVue/ClientVue_QA/webapps --> cp -p /data/SCMSupport/Release/08SEP23/war/clientgateway.war .
+13.	unzip clientgateway.war -d clientgateway
+14.	To Start the tomcat path:  /data/ClientVue/ClientVue_QA/bin/  
+start the tomcat using ./startup.sh 
+15.	To check the logs: Path: /data/ClientVue/ClientVue_QA/logs> tail -100f Catalina.out 
+16.	Application log: path: /data/ClientVue/ClientVue_QA/logs> tail -100f ipp
+
+
+
+
+----------------------------------END------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
